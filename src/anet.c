@@ -246,6 +246,28 @@ static int anetSetReuseAddr(char *err, int fd) {
     return ANET_OK;
 }
 
+static int anetSetTCPFastOpen(char *err, int fd) {
+    int yes = 4;
+    /* Make sure connection-intensive things like the redis benckmark
+     * will be able to close/open sockets a zillion of times */
+    if (setsockopt(fd, SOL_TCP, TCP_FASTOPEN, &yes, sizeof(yes)) == -1) {
+        anetSetError(err, "setsockopt TCP_FASTOPEN: %s", strerror(errno));
+        return ANET_ERR;
+    }
+    return ANET_OK;
+}
+
+static int anetSetReusePort(char *err, int fd) {
+    int yes = 1;
+    /* Make sure connection-intensive things like the redis benckmark
+     * will be able to close/open sockets a zillion of times */
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes)) == -1) {
+        anetSetError(err, "setsockopt SO_REUSEPORT: %s", strerror(errno));
+        return ANET_ERR;
+    }
+    return ANET_OK;
+}
+
 static int anetCreateSocket(char *err, int domain) {
     int s;
     if ((s = socket(domain, SOCK_STREAM, 0)) == -1) {
@@ -259,6 +281,21 @@ static int anetCreateSocket(char *err, int domain) {
         close(s);
         return ANET_ERR;
     }
+
+    /* Enable TCP_FASTOPEN so that data can be sent with the handshake packets
+     * and filtered using BPF */
+    if (anetSetTCPFastOpen(err,s) == ANET_ERR) {
+        close(s);
+        return ANET_ERR;
+    }
+
+    /* Make sure the redis server can listen on the same port as the LCP module
+     */
+    if (anetSetReusePort(err,s) == ANET_ERR) {
+        close(s);
+        return ANET_ERR;
+    }
+
     return s;
 }
 
